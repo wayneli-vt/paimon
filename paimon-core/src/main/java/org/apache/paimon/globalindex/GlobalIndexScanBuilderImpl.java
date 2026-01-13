@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexPathFactory;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.partition.PartitionPredicate;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
@@ -53,6 +54,8 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
     private Snapshot snapshot;
     private PartitionPredicate partitionPredicate;
     private Range rowRange;
+    private Predicate predicate;
+    private List<IndexManifestEntry> entries;
     private VectorSearch vectorSearch;
 
     public GlobalIndexScanBuilderImpl(
@@ -95,9 +98,23 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
     }
 
     @Override
+    public GlobalIndexScanBuilder withPredicate(Predicate predicate) {
+        this.predicate = predicate;
+        return this;
+    }
+
+    @Override
+    public GlobalIndexScanBuilder withEntries(List<IndexManifestEntry> entries) {
+        this.entries = entries;
+        return this;
+    }
+
+    @Override
     public RowRangeGlobalIndexScanner build() {
         Objects.requireNonNull(rowRange, "rowRange must not be null");
-        List<IndexManifestEntry> entries = scan();
+        if (this.entries == null) {
+            this.entries = scan();
+        }
         return new RowRangeGlobalIndexScanner(
                 options, rowType, fileIO, indexPathFactory, rowRange, entries);
     }
@@ -158,7 +175,8 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
                         .collect(Collectors.toList()));
     }
 
-    private List<IndexManifestEntry> scan() {
+    @Override
+    public List<IndexManifestEntry> scan() {
         Filter<IndexManifestEntry> filter =
                 entry -> {
                     if (partitionPredicate != null) {
@@ -166,8 +184,8 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
                             return false;
                         }
                     }
+                    GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();
                     if (rowRange != null) {
-                        GlobalIndexMeta globalIndexMeta = entry.indexFile().globalIndexMeta();
                         if (globalIndexMeta == null) {
                             return false;
                         }
@@ -175,6 +193,12 @@ public class GlobalIndexScanBuilderImpl implements GlobalIndexScanBuilder {
                         long entryEnd = globalIndexMeta.rowRangeEnd();
 
                         if (!Range.intersect(entryStart, entryEnd, rowRange.from, rowRange.to)) {
+                            return false;
+                        }
+                    }
+                    // TODO: support different kind of index type to filter
+                    if (predicate != null) {
+                        if (globalIndexMeta == null) {
                             return false;
                         }
                     }

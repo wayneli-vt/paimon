@@ -19,8 +19,10 @@
 package org.apache.paimon.globalindex;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.VectorSearch;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Range;
@@ -47,10 +49,33 @@ public interface GlobalIndexScanBuilder {
 
     GlobalIndexScanBuilder withRowRange(Range rowRange);
 
+    /**
+     * Apply filters to decrease the number of {@link IndexManifestEntry}.
+     *
+     * <p>This interface filters {@link IndexManifestEntry} as much as possible, however some
+     * produced records may not satisfy all predicates. Users need to recheck all records.
+     */
+    default GlobalIndexScanBuilder withPredicate(List<Predicate> predicates) {
+        if (predicates == null || predicates.isEmpty()) {
+            return this;
+        }
+        return withPredicate(PredicateBuilder.and(predicates));
+    }
+
+    /**
+     * Push filters, will filter {@link IndexManifestEntry} as much as possible, but it is not
+     * guaranteed that it is a complete filter.
+     */
+    GlobalIndexScanBuilder withPredicate(Predicate predicate);
+
+    GlobalIndexScanBuilder withEntries(List<IndexManifestEntry> entries);
+
     RowRangeGlobalIndexScanner build();
 
     // Return sorted and no overlap ranges
     List<Range> shardList();
+
+    List<IndexManifestEntry> scan();
 
     static Optional<GlobalIndexResult> parallelScan(
             final List<Range> ranges,
